@@ -1,0 +1,11 @@
+break stop
+break stop.next_two
+display /x $al
+display $dl
+display /x LC1
+display /x *($ebx)
+display /x (char[8])LC1
+display /x (char[8])*($ebx)
+run
+0123456789abcdef
+2

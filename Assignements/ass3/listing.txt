@@ -1,0 +1,823 @@
+     1                                  ;;;;;;;;;;; Macros ;;;;;;;;;;;
+     2                                  %macro init_func 0
+     3                                    push ebp           ; save previous value of ebp
+     4                                    mov ebp, esp       ; set ebp to point to myFunc frame
+     5                                  %endmacro
+     6                                  
+     7                                  %macro return_from_func 0
+     8                                    mov esp, ebp      ; "delete" local variables of myFunc
+     9                                    pop ebp           ; restore previous value of ebp
+    10                                    RET               ; return to the caller
+    11                                  %endmacro
+    12                                  
+    13                                  %macro print 2       ; call printf
+    14                                    pusha
+    15                                    push dword %1
+    16                                    push dword %2
+    17                                    call printf
+    18                                    add esp, 8
+    19                                    popa
+    20                                  %endmacro
+    21                                  
+    22                                  %macro err_exit 1
+    23                                    print %1, FORMAT_STRING
+    24                                    mov eax, 1
+    25                                    xor ebx, ebx
+    26                                    int 80h
+    27                                  %endmacro
+    28                                  
+    29                                  ;read 1 byte from file
+    30                                  %macro read_byte 0
+    31                                      pusha
+    32                                      mov eax, 3
+    33                                      mov ebx, dword [FD]
+    34                                      mov ecx, BUFF
+    35                                      mov edx, 1
+    36                                      int 0x80
+    37                                      cmp eax, 0
+    38                                      jne %%.read_ok
+    39                                      err_exit ERR_EOF
+    40                                      %%.read_ok:
+    41                                      popa
+    42                                  %endmacro
+    43                                  
+    44                                  %macro call_malloc 2
+    45                                    pusha
+    46                                    push %1
+    47                                    call malloc
+    48                                    mov %2, eax
+    49                                    add esp, 4
+    50                                    popa
+    51                                  %endmacro
+    52                                  
+    53                                  %macro call_free 1
+    54                                    pusha
+    55                                    push %1
+    56                                    call free
+    57                                    add esp, 4
+    58                                    popa
+    59                                  %endmacro
+    60                                  
+    61                                  %macro allocate_co 4
+    62                                    pusha
+    63                                    call_malloc CO_SIZE, %1
+    64                                    mov eax, %1
+    65                                    mov dword [eax+CODEP], %2
+    66                                    mov dword [eax+FLAGSP], 0
+    67                                    mov dword [eax+ARG1], %3
+    68                                    mov dword [eax+ARG2], %4
+    69                                    mov ecx, eax
+    70                                    add ecx, CO_SIZE
+    71                                    mov dword [eax+SPP], ecx
+    72                                    popa
+    73                                  %endmacro
+    74                                  
+    75                                  
+    76                                  STKSZ equ 16*1024        ; co-routine stack size
+    77                                  CODEP equ 0              ; offset of pointer to co-routine function in co-routine structure
+    78                                  FLAGSP equ 4             ; offset of pointer to flags co-routine structure
+    79                                  ARG1  equ 8
+    80                                  ARG2 equ 12
+    81                                  SPP equ 16               ; offset of pointer to co-routine stack in co-routine structure
+    82                                  CO_SIZE equ STKSZ+20
+    83                                  BUFF_SIZE equ 2
+    84                                  
+    85                                  ;;;;;;;;;;; Read only data ;;;;;;;;;;;
+    86                                  section .rodata
+    87                                    align 16
+    88                                    global FORMAT_INT
+    89 00000000 25642000                  FORMAT_INT: db "%d ",0      ; int formating string
+    90 00000004 25730A00                  FORMAT_STRING:  db "%s",10, 0      ; string formating string
+    91 00000008 25630A00                  FORMAT_CHAR:  db "%c", 10,0      ; char formating string
+    92 0000000C 6C656E6774683D2564-       FORMAT_DEBUG db "length=%d",10,"width=%d",10,"number of generations=%d",10,"print frequency=%d",10,0
+    93 00000015 0A77696474683D2564-
+    94 0000001E 0A6E756D626572206F-
+    95 00000027 662067656E65726174-
+    96 00000030 696F6E733D25640A70-
+    97 00000039 72696E742066726571-
+    98 00000042 75656E63793D25640A-
+    99 0000004B 00                 
+   100 0000004C 2000                      NL: db " ",0
+   101 0000004E 4572726F7220696E63-       ERR_ARGS: db "Error incorrect args, expected: [optional -d] <filename> <length> <width> <t> <k>",0
+   102 00000057 6F7272656374206172-
+   103 00000060 67732C206578706563-
+   104 00000069 7465643A205B6F7074-
+   105 00000072 696F6E616C202D645D-
+   106 0000007B 203C66696C656E616D-
+   107 00000084 653E203C6C656E6774-
+   108 0000008D 683E203C7769647468-
+   109 00000096 3E203C743E203C6B3E-
+   110 0000009F 00                 
+   111 000000A0 4572726F72206F7065-       ERR_OPEN: db "Error opening file. exiting...", 0
+   112 000000A9 6E696E672066696C65-
+   113 000000B2 2E2065786974696E67-
+   114 000000BB 2E2E2E00           
+   115 000000BF 4572726F7220726561-       ERR_EOF: db "Error reached end of file before expected. exiting...",0
+   116 000000C8 6368656420656E6420-
+   117 000000D1 6F662066696C652062-
+   118 000000DA 65666F726520657870-
+   119 000000E3 65637465642E206578-
+   120 000000EC 6974696E672E2E2E00 
+   121 000000F5 0A000000                  TEN: dd 10
+   122 000000F9 00000000                  CORS: dd 0
+   123                                  
+   124                                  ;;;;;;;;;;; Initialized data ;;;;;;;;;;;
+   125                                  section .data
+   126                                    align 16
+   127 00000000 FFFFFFFF                  FD: dd -1
+   128                                    global DEBUG
+   129 00000004 00000000                  DEBUG: dd 0
+   130                                    global WorldWidth
+   131 00000008 00000000                  WorldWidth: dd 0
+   132                                    global WorldLength
+   133 0000000C 00000000                  WorldLength: dd 0
+   134                                    global NumGen
+   135 00000010 00000000                  NumGen: dd 0
+   136                                    global NumCo
+   137 00000014 00000000                  NumCo: dd 0
+   138                                    global NumCells
+   139 00000018 00000000                  NumCells: dd 0
+   140                                    global PrintRate
+   141 0000001C 00000000                  PrintRate: dd 0
+   142                                    global state
+   143 00000020 00000000                  state: dd 0
+   144                                    global cors
+   145 00000024 00000000                  cors: dd 0
+   146                                    global cells
+   147 00000028 00000000                  cells: dd 0
+   148                                    global scheduler
+   149 0000002C 00000000                  scheduler: dd 0
+   150                                    global printer
+   151 00000030 00000000                  printer: dd 0
+   152                                  
+   153                                  ;;;;;;;;;;; Uninitialized data ;;;;;;;;;;;
+   154                                  section .bss
+   155                                    align 16
+   156 00000000 <res 00000004>            CURR: resd 1
+   157 00000004 <res 00000004>            SPT: resd 1        ; temporary stack pointer variable
+   158 00000008 <res 00000004>            SPMAIN: resd 1     ; stack pointer of main
+   159 0000000C <res 00004000>            STK: resb STKSZ
+   160 0000400C <res 00000008>            STATE: resd 2
+   161 00004014 <res 00000008>            STATE_CONT: resd 2
+   162 0000401C <res 00000002>            BUFF: resb BUFF_SIZE
+   163                                  
+   164                                  ;;;;;;;;;;; CODE ;;;;;;;;;;;
+   165                                  section .text
+   166                                    align 16
+   167                                    extern printf
+   168                                    extern fgets
+   169                                    extern malloc
+   170                                    extern free
+   171                                    extern secheduler_func
+   172                                    extern printer_func
+   173                                    extern print_state
+   174                                    global build_structures
+   175                                    global init_co_from_c
+   176                                    global start_co_from_c
+   177                                    global resume
+   178                                    global end_co
+   179                                    global clear_data
+   180                                  
+   181                                  build_structures:
+   182 00000000 8B4508                    mov eax, [ebp+8]  ;get argc
+   183 00000003 8B5D0C                    mov ebx, [ebp+12] ; get argv
+   184                                    init_func
+   185 00000006 55                  <1>  push ebp
+   186 00000007 89E5                <1>  mov ebp, esp
+   187                                  
+   188                                      ;check debug flag
+   189 00000009 83F807                      cmp eax, 7        ; if argc = 7 and argv[1] = -d then debug flag is on
+   190 0000000C 751C                        jne .no_debug
+   191 0000000E 8B4B04                        mov ecx, dword [ebx + 4]      ; get argv[1]
+   192 00000011 80392D                        cmp byte [ecx], '-'
+   193 00000014 7514                          jne .no_debug
+   194 00000016 80790164                      cmp byte [ecx+1], 'd'
+   195 0000001A 750E                          jne .no_debug
+   196 0000001C C705[04000000]0100-           mov dword [DEBUG], 1
+   197 00000024 0000               
+   198 00000026 83C304                        add ebx, 4
+   199 00000029 48                            dec eax
+   200                                  
+   201                                      .no_debug:
+   202                                      ; check correct number of atgs
+   203 0000002A 83F806                      cmp eax, 6        ; there needs to be 6 args
+   204 0000002D 741D                        je .open_file
+   205                                        ; print an error and exit
+   206                                        err_exit ERR_ARGS
+   207                              <1>  print %1, FORMAT_STRING
+   208 0000002F 60                  <2>  pusha
+   209 00000030 68[4E000000]        <2>  push dword %1
+   210 00000035 68[04000000]        <2>  push dword %2
+   211 0000003A E8(00000000)        <2>  call printf
+   212 0000003F 83C408              <2>  add esp, 8
+   213 00000042 61                  <2>  popa
+   214 00000043 B801000000          <1>  mov eax, 1
+   215 00000048 31DB                <1>  xor ebx, ebx
+   216 0000004A CD80                <1>  int 80h
+   217                                  
+   218                                      .open_file:
+   219                                        ;open the file for reading
+   220 0000004C 60                            pusha
+   221 0000004D B805000000                    mov eax, 5
+   222 00000052 8B5B04                        mov ebx, dword [ebx + 4]  ;get argv[2] (file name)
+   223 00000055 B900000000                    mov ecx, 0          ;for read only access
+   224 0000005A BA09030000                    mov edx, 0777       ;read, write and execute by all
+   225 0000005F CD80                          int  0x80
+   226 00000061 83F800                        cmp eax, 0    ; if file did not open correctly print error and exit
+   227 00000064 7D1D                          jge .open_ok
+   228                                        ; print an error and exit
+   229                                        err_exit ERR_OPEN
+   230                              <1>  print %1, FORMAT_STRING
+   231 00000066 60                  <2>  pusha
+   232 00000067 68[A0000000]        <2>  push dword %1
+   233 0000006C 68[04000000]        <2>  push dword %2
+   234 00000071 E8(00000000)        <2>  call printf
+   235 00000076 83C408              <2>  add esp, 8
+   236 00000079 61                  <2>  popa
+   237 0000007A B801000000          <1>  mov eax, 1
+   238 0000007F 31DB                <1>  xor ebx, ebx
+   239 00000081 CD80                <1>  int 80h
+   240                                        .open_ok:
+   241 00000083 A3[00000000]                  mov  [FD], eax
+   242 00000088 61                            popa
+   243                                  
+   244                                      ; set WorldLength
+   245 00000089 FF7308                      push dword [ebx + 8]
+   246 0000008C E834030000                  call atoi
+   247 00000091 A3[0C000000]                mov dword [WorldLength], eax
+   248                                  
+   249                                      ; set WorldWidth
+   250 00000096 FF730C                      push dword [ebx + 12]
+   251 00000099 E827030000                  call atoi
+   252 0000009E A3[08000000]                mov dword [WorldWidth], eax
+   253                                  
+   254                                      ; set NumGen
+   255 000000A3 FF7310                      push dword [ebx + 16]
+   256 000000A6 E81A030000                  call atoi
+   257 000000AB A3[10000000]                mov dword [NumGen], eax
+   258                                  
+   259                                      ; set PrintRate
+   260 000000B0 FF7314                      push dword [ebx + 20]
+   261 000000B3 E80D030000                  call atoi
+   262 000000B8 A3[1C000000]                mov dword [PrintRate], eax
+   263                                  
+   264                                      ; set NumCells
+   265 000000BD A1[0C000000]                mov eax, dword [WorldLength]
+   266 000000C2 F725[08000000]              mul dword [WorldWidth]
+   267 000000C8 A3[18000000]                mov dword [NumCells], eax
+   268                                  
+   269                                      ; allocate state
+   270                                      call_malloc eax, dword [state]; eax still holds NumCells
+   271 000000CD 60                  <1>  pusha
+   272 000000CE 50                  <1>  push %1
+   273 000000CF E8(00000000)        <1>  call malloc
+   274 000000D4 A3[20000000]        <1>  mov %2, eax
+   275 000000D9 83C404              <1>  add esp, 4
+   276 000000DC 61                  <1>  popa
+   277                                  
+   278 000000DD B900000000                  mov ecx, 0
+   279 000000E2 8B15[20000000]              mov edx, dword [state]
+   280                                  
+   281                                      ; read file into state
+   282                                      .read_line:
+   283 000000E8 BB00000000                    mov ebx, 0
+   284 000000ED 41                            inc ecx
+   285                                        .read_cell:
+   286 000000EE F7C101000000                  test ecx, 1
+   287 000000F4 0F8488000000                  jz .even_line
+   288                                          ; odd line
+   289                                          read_byte       ; read state of the next cell as char
+   290 000000FA 60                  <1>  pusha
+   291 000000FB B803000000          <1>  mov eax, 3
+   292 00000100 8B1D[00000000]      <1>  mov ebx, dword [FD]
+   293 00000106 B9[1C400000]        <1>  mov ecx, BUFF
+   294 0000010B BA01000000          <1>  mov edx, 1
+   295 00000110 CD80                <1>  int 0x80
+   296 00000112 83F800              <1>  cmp eax, 0
+   297 00000115 751D                <1>  jne %%.read_ok
+   298                              <1>  err_exit ERR_EOF
+   299                              <2>  print %1, FORMAT_STRING
+   300 00000117 60                  <3>  pusha
+   301 00000118 68[BF000000]        <3>  push dword %1
+   302 0000011D 68[04000000]        <3>  push dword %2
+   303 00000122 E8(00000000)        <3>  call printf
+   304 00000127 83C408              <3>  add esp, 8
+   305 0000012A 61                  <3>  popa
+   306 0000012B B801000000          <2>  mov eax, 1
+   307 00000130 31DB                <2>  xor ebx, ebx
+   308 00000132 CD80                <2>  int 80h
+   309                              <1>  %%.read_ok:
+   310 00000134 61                  <1>  popa
+   311 00000135 68[1C400000]                    push dword BUFF
+   312 0000013A E886020000                      call atoi       ; convert to int
+   313 0000013F 88041A                          mov byte [edx+ebx], al
+   314                                          read_byte ; read through the deviding space char (" ")
+   315 00000142 60                  <1>  pusha
+   316 00000143 B803000000          <1>  mov eax, 3
+   317 00000148 8B1D[00000000]      <1>  mov ebx, dword [FD]
+   318 0000014E B9[1C400000]        <1>  mov ecx, BUFF
+   319 00000153 BA01000000          <1>  mov edx, 1
+   320 00000158 CD80                <1>  int 0x80
+   321 0000015A 83F800              <1>  cmp eax, 0
+   322 0000015D 751D                <1>  jne %%.read_ok
+   323                              <1>  err_exit ERR_EOF
+   324                              <2>  print %1, FORMAT_STRING
+   325 0000015F 60                  <3>  pusha
+   326 00000160 68[BF000000]        <3>  push dword %1
+   327 00000165 68[04000000]        <3>  push dword %2
+   328 0000016A E8(00000000)        <3>  call printf
+   329 0000016F 83C408              <3>  add esp, 8
+   330 00000172 61                  <3>  popa
+   331 00000173 B801000000          <2>  mov eax, 1
+   332 00000178 31DB                <2>  xor ebx, ebx
+   333 0000017A CD80                <2>  int 80h
+   334                              <1>  %%.read_ok:
+   335 0000017C 61                  <1>  popa
+   336 0000017D E983000000                      jmp .cell_done
+   337                                        .even_line:
+   338                                          read_byte       ; read through the deviding space char (" ")
+   339 00000182 60                  <1>  pusha
+   340 00000183 B803000000          <1>  mov eax, 3
+   341 00000188 8B1D[00000000]      <1>  mov ebx, dword [FD]
+   342 0000018E B9[1C400000]        <1>  mov ecx, BUFF
+   343 00000193 BA01000000          <1>  mov edx, 1
+   344 00000198 CD80                <1>  int 0x80
+   345 0000019A 83F800              <1>  cmp eax, 0
+   346 0000019D 751D                <1>  jne %%.read_ok
+   347                              <1>  err_exit ERR_EOF
+   348                              <2>  print %1, FORMAT_STRING
+   349 0000019F 60                  <3>  pusha
+   350 000001A0 68[BF000000]        <3>  push dword %1
+   351 000001A5 68[04000000]        <3>  push dword %2
+   352 000001AA E8(00000000)        <3>  call printf
+   353 000001AF 83C408              <3>  add esp, 8
+   354 000001B2 61                  <3>  popa
+   355 000001B3 B801000000          <2>  mov eax, 1
+   356 000001B8 31DB                <2>  xor ebx, ebx
+   357 000001BA CD80                <2>  int 80h
+   358                              <1>  %%.read_ok:
+   359 000001BC 61                  <1>  popa
+   360                                          read_byte ; read state of the next cell as char
+   361 000001BD 60                  <1>  pusha
+   362 000001BE B803000000          <1>  mov eax, 3
+   363 000001C3 8B1D[00000000]      <1>  mov ebx, dword [FD]
+   364 000001C9 B9[1C400000]        <1>  mov ecx, BUFF
+   365 000001CE BA01000000          <1>  mov edx, 1
+   366 000001D3 CD80                <1>  int 0x80
+   367 000001D5 83F800              <1>  cmp eax, 0
+   368 000001D8 751D                <1>  jne %%.read_ok
+   369                              <1>  err_exit ERR_EOF
+   370                              <2>  print %1, FORMAT_STRING
+   371 000001DA 60                  <3>  pusha
+   372 000001DB 68[BF000000]        <3>  push dword %1
+   373 000001E0 68[04000000]        <3>  push dword %2
+   374 000001E5 E8(00000000)        <3>  call printf
+   375 000001EA 83C408              <3>  add esp, 8
+   376 000001ED 61                  <3>  popa
+   377 000001EE B801000000          <2>  mov eax, 1
+   378 000001F3 31DB                <2>  xor ebx, ebx
+   379 000001F5 CD80                <2>  int 80h
+   380                              <1>  %%.read_ok:
+   381 000001F7 61                  <1>  popa
+   382 000001F8 68[1C400000]                    push dword BUFF
+   383 000001FD E8C3010000                      call atoi       ; convert to int
+   384 00000202 88041A                          mov byte [edx+ebx], al
+   385                                        .cell_done:
+   386 00000205 43                              inc ebx
+   387 00000206 3B1D[08000000]                  cmp ebx, dword [WorldWidth]
+   388 0000020C 0F85DCFEFFFF                    jnz .read_cell
+   389 00000212 0315[08000000]                add edx, dword [WorldWidth]
+   390 00000218 3B0D[0C000000]                cmp ecx, dword [WorldLength]
+   391 0000021E 7449                          jz .read_end
+   392                                        .seek_to_end_of_line:
+   393                                          read_byte ; read through the deviding new line char
+   394 00000220 60                  <1>  pusha
+   395 00000221 B803000000          <1>  mov eax, 3
+   396 00000226 8B1D[00000000]      <1>  mov ebx, dword [FD]
+   397 0000022C B9[1C400000]        <1>  mov ecx, BUFF
+   398 00000231 BA01000000          <1>  mov edx, 1
+   399 00000236 CD80                <1>  int 0x80
+   400 00000238 83F800              <1>  cmp eax, 0
+   401 0000023B 751D                <1>  jne %%.read_ok
+   402                              <1>  err_exit ERR_EOF
+   403                              <2>  print %1, FORMAT_STRING
+   404 0000023D 60                  <3>  pusha
+   405 0000023E 68[BF000000]        <3>  push dword %1
+   406 00000243 68[04000000]        <3>  push dword %2
+   407 00000248 E8(00000000)        <3>  call printf
+   408 0000024D 83C408              <3>  add esp, 8
+   409 00000250 61                  <3>  popa
+   410 00000251 B801000000          <2>  mov eax, 1
+   411 00000256 31DB                <2>  xor ebx, ebx
+   412 00000258 CD80                <2>  int 80h
+   413                              <1>  %%.read_ok:
+   414 0000025A 61                  <1>  popa
+   415                                  
+   416 0000025B 803D[1C400000]0A                cmp byte [BUFF], 10
+   417 00000262 75BC                            jnz .seek_to_end_of_line
+   418 00000264 E97FFEFFFF                    jmp .read_line
+   419                                        .read_end:
+   420                                  
+   421                                      ; allocate cors and set NumCo
+   422 00000269 A1[18000000]                mov eax, dword [NumCells]
+   423 0000026E 83C002                      add eax, 2
+   424 00000271 A3[14000000]                mov dword [NumCo], eax
+   425 00000276 C1E002                      shl eax, 2
+   426                                      call_malloc eax, dword [cors]
+   427 00000279 60                  <1>  pusha
+   428 0000027A 50                  <1>  push %1
+   429 0000027B E8(00000000)        <1>  call malloc
+   430 00000280 A3[24000000]        <1>  mov %2, eax
+   431 00000285 83C404              <1>  add esp, 4
+   432 00000288 61                  <1>  popa
+   433                                  
+   434                                      ; set cells
+   435 00000289 8B1D[24000000]              mov ebx, dword[cors]
+   436 0000028F 83C308                      add ebx, 8
+   437 00000292 891D[28000000]              mov dword [cells], ebx
+   438                                  
+   439                                      ; allocate scheduler co-routine and set a pointer to it in cors
+   440 00000298 8B1D[24000000]              mov ebx, dword[cors]  ; set ebx to point to start of cors
+   441 0000029E 8B0D[10000000]              mov ecx, dword[NumGen]
+   442 000002A4 8B15[1C000000]              mov edx, dword[PrintRate]
+   443                                      allocate_co dword [ebx], secheduler_func, ecx, edx
+   444 000002AA 60                  <1>  pusha
+   445                              <1>  call_malloc CO_SIZE, %1
+   446 000002AB 60                  <2>  pusha
+   447 000002AC 6814400000          <2>  push %1
+   448 000002B1 E8(00000000)        <2>  call malloc
+   449 000002B6 8903                <2>  mov %2, eax
+   450 000002B8 83C404              <2>  add esp, 4
+   451 000002BB 61                  <2>  popa
+   452 000002BC 8B03                <1>  mov eax, %1
+   453 000002BE C700[00000000]      <1>  mov dword [eax+CODEP], %2
+   454 000002C4 C7400400000000      <1>  mov dword [eax+FLAGSP], 0
+   455 000002CB 894808              <1>  mov dword [eax+ARG1], %3
+   456 000002CE 89500C              <1>  mov dword [eax+ARG2], %4
+   457 000002D1 89C1                <1>  mov ecx, eax
+   458 000002D3 81C114400000        <1>  add ecx, CO_SIZE
+   459 000002D9 894810              <1>  mov dword [eax+SPP], ecx
+   460 000002DC 61                  <1>  popa
+   461 000002DD 8B0B                        mov ecx, dword [ebx]
+   462 000002DF 890D[2C000000]              mov dword [scheduler], ecx
+   463                                  
+   464                                      ; allocate printer co-routine and set a pointer to it in cors
+   465 000002E5 83C304                      add ebx, 4
+   466 000002E8 8B0D[0C000000]              mov ecx, dword[WorldLength]
+   467 000002EE 8B15[08000000]              mov edx, dword[WorldWidth]
+   468                                      allocate_co dword [ebx], printer_func, ecx, edx
+   469 000002F4 60                  <1>  pusha
+   470                              <1>  call_malloc CO_SIZE, %1
+   471 000002F5 60                  <2>  pusha
+   472 000002F6 6814400000          <2>  push %1
+   473 000002FB E8(00000000)        <2>  call malloc
+   474 00000300 8903                <2>  mov %2, eax
+   475 00000302 83C404              <2>  add esp, 4
+   476 00000305 61                  <2>  popa
+   477 00000306 8B03                <1>  mov eax, %1
+   478 00000308 C700[00000000]      <1>  mov dword [eax+CODEP], %2
+   479 0000030E C7400400000000      <1>  mov dword [eax+FLAGSP], 0
+   480 00000315 894808              <1>  mov dword [eax+ARG1], %3
+   481 00000318 89500C              <1>  mov dword [eax+ARG2], %4
+   482 0000031B 89C1                <1>  mov ecx, eax
+   483 0000031D 81C114400000        <1>  add ecx, CO_SIZE
+   484 00000323 894810              <1>  mov dword [eax+SPP], ecx
+   485 00000326 61                  <1>  popa
+   486 00000327 8B0B                        mov ecx, dword [ebx]
+   487 00000329 890D[30000000]              mov dword[printer], ecx
+   488                                  
+   489                                      ; allocate space for all cell co-routines and set pointers to them in cors
+   490 0000032F 83C304                      add ebx, 4
+   491 00000332 BA00000000                  mov edx, 0
+   492                                      .next_row:
+   493 00000337 B900000000                    mov ecx, 0
+   494                                        .next_cell:
+   495                                          ;print edx, FORMAT_INT
+   496                                          allocate_co dword [ebx], cell_func, ecx, edx
+   497 0000033C 60                  <1>  pusha
+   498                              <1>  call_malloc CO_SIZE, %1
+   499 0000033D 60                  <2>  pusha
+   500 0000033E 6814400000          <2>  push %1
+   501 00000343 E8(00000000)        <2>  call malloc
+   502 00000348 8903                <2>  mov %2, eax
+   503 0000034A 83C404              <2>  add esp, 4
+   504 0000034D 61                  <2>  popa
+   505 0000034E 8B03                <1>  mov eax, %1
+   506 00000350 C700[AB040000]      <1>  mov dword [eax+CODEP], %2
+   507 00000356 C7400400000000      <1>  mov dword [eax+FLAGSP], 0
+   508 0000035D 894808              <1>  mov dword [eax+ARG1], %3
+   509 00000360 89500C              <1>  mov dword [eax+ARG2], %4
+   510 00000363 89C1                <1>  mov ecx, eax
+   511 00000365 81C114400000        <1>  add ecx, CO_SIZE
+   512 0000036B 894810              <1>  mov dword [eax+SPP], ecx
+   513 0000036E 61                  <1>  popa
+   514 0000036F 83C304                          add ebx, 4
+   515 00000372 83C101                          add ecx, 1
+   516 00000375 3B0D[08000000]                  cmp ecx, dword [WorldWidth]
+   517 0000037B 75BF                            jnz .next_cell
+   518 0000037D 42                            inc edx
+   519 0000037E 3B15[0C000000]                cmp edx, dword [WorldLength]
+   520 00000384 75B1                          jnz .next_row
+   521                                  
+   522 00000386 60                            pusha
+   523 00000387 FF35[1C000000]                push dword [PrintRate]
+   524 0000038D FF35[10000000]                push dword [NumGen]
+   525 00000393 FF35[08000000]                push dword [WorldWidth]
+   526 00000399 FF35[0C000000]                push dword [WorldLength]
+   527 0000039F 68[0C000000]                  push FORMAT_DEBUG
+   528 000003A4 E8(00000000)                  call printf
+   529 000003A9 83C414                        add esp, 20
+   530                                  
+   531 000003AC FF35[08000000]                push dword [WorldWidth]
+   532 000003B2 FF35[0C000000]                push dword [WorldLength]
+   533 000003B8 E8(00000000)                  call print_state
+   534 000003BD 83C408                        add esp, 8
+   535 000003C0 61                            popa
+   536                                    return_from_func
+   537 000003C1 89EC                <1>  mov esp, ebp
+   538 000003C3 5D                  <1>  pop ebp
+   539 000003C4 C3                  <1>  RET
+   540                                  
+   541                                  
+   542                                  
+   543                                  atoi:
+   544                                    init_func
+   545 000003C5 55                  <1>  push ebp
+   546 000003C6 89E5                <1>  mov ebp, esp
+   547 000003C8 51                          push ecx
+   548 000003C9 52                          push edx
+   549 000003CA 53                          push ebx
+   550 000003CB 8B4D08                      mov ecx, dword [ebp+8]  ; Get argument (pointer to string)
+   551 000003CE 31C0                        xor eax,eax
+   552 000003D0 31DB                        xor ebx,ebx
+   553                                    .atoi_loop:
+   554 000003D2 31D2                        xor edx,edx
+   555 000003D4 803900                      cmp byte[ecx],0
+   556 000003D7 7410                        jz  .atoi_end
+   557 000003D9 F72D[F5000000]              imul dword [TEN]
+   558 000003DF 8A19                        mov bl,byte[ecx]
+   559 000003E1 80EB30                      sub bl,'0'
+   560 000003E4 01D8                        add eax,ebx
+   561 000003E6 41                          inc ecx
+   562 000003E7 EBE9                        jmp .atoi_loop
+   563                                    .atoi_end:
+   564 000003E9 5B                          pop ebx                 ; Restore registers
+   565 000003EA 5A                          pop edx
+   566 000003EB 59                          pop ecx
+   567                                    return_from_func
+   568 000003EC 89EC                <1>  mov esp, ebp
+   569 000003EE 5D                  <1>  pop ebp
+   570 000003EF C3                  <1>  RET
+   571                                  
+   572                                  
+   573                                  init_co_from_c:
+   574                                    init_func
+   575 000003F0 55                  <1>  push ebp
+   576 000003F1 89E5                <1>  mov ebp, esp
+   577 000003F3 8B5D08                      mov ebx, dword [ebp+8] ; ebx contains the index of the co-routine to be initialized
+   578 000003F6 A1[24000000]                mov eax, dword [cors]
+   579 000003FB 8B1C98                      mov ebx, dword [eax + 4*ebx]
+   580 000003FE E804000000                  call co_init
+   581                                    return_from_func
+   582 00000403 89EC                <1>  mov esp, ebp
+   583 00000405 5D                  <1>  pop ebp
+   584 00000406 C3                  <1>  RET
+   585                                  
+   586                                  
+   587                                  co_init:
+   588 00000407 60                          pusha
+   589 00000408 0FBA6B0400                  bts dword [ebx+FLAGSP],0 ; test if already initialized
+   590 0000040D 7223                        jc .init_done
+   591 0000040F 8B03                        mov eax, dword [ebx+CODEP] ; get initial PC
+   592 00000411 8925[04000000]              mov [SPT], esp ; save original SP
+   593 00000417 8B6310                      mov esp, dword [ebx+SPP] ; get initial SP
+   594 0000041A FF730C                      push dword[ebx+ARG2]  ; push second argument
+   595 0000041D FF7308                      push dword[ebx+ARG1]  ; push first argument
+   596 00000420 6A00                        push 0
+   597 00000422 6A00                        push 0
+   598 00000424 89E5                        mov ebp, esp ; also use as EBP
+   599 00000426 50                          push eax ; push initial "return" address (initial PC)
+   600 00000427 9C                          pushfd ; push flags
+   601 00000428 60                          pushad ; push all other registers
+   602 00000429 896310                      mov [ebx+SPP],esp ; save new SP in structure
+   603 0000042C 8B25[04000000]              mov esp, [SPT] ; restore original SP
+   604                                    .init_done:
+   605 00000432 61                          popa
+   606 00000433 C3                          ret
+   607                                  
+   608                                  start_co_from_c:
+   609                                    init_func
+   610 00000434 55                  <1>  push ebp
+   611 00000435 89E5                <1>  mov ebp, esp
+   612 00000437 60                        pusha
+   613 00000438 8925[08000000]            mov dword[SPMAIN], esp
+   614 0000043E 8B1D[2C000000]            mov ebx, dword[scheduler] ; get a pointer to the scheduler structure
+   615 00000444 EB16                      jmp do_resume
+   616                                  
+   617                                  end_co:
+   618 00000446 8B25[08000000]            mov esp, dword [SPMAIN]
+   619 0000044C 61                        popa
+   620                                    return_from_func
+   621 0000044D 89EC                <1>  mov esp, ebp
+   622 0000044F 5D                  <1>  pop ebp
+   623 00000450 C3                  <1>  RET
+   624                                  
+   625                                  resume:       ;save caller state
+   626 00000451 9C                        pushf
+   627 00000452 60                        pusha
+   628 00000453 8B15[00000000]            mov edx, dword [CURR]
+   629 00000459 896210                    mov dword [edx+SPP], esp ; save current SP
+   630                                  
+   631                                  do_resume:  ; load SP in order to resume co-routine
+   632 0000045C 8B6310                    mov esp, dword [ebx+SPP]
+   633 0000045F 891D[00000000]            mov [CURR], ebx
+   634 00000465 61                        popa   ; restore resumed co-routine state
+   635 00000466 9D                        popf
+   636 00000467 C3                        ret     ; "return" to resumed co-routine
+   637                                  
+   638                                  clear_data:
+   639                                    init_func
+   640 00000468 55                  <1>  push ebp
+   641 00000469 89E5                <1>  mov ebp, esp
+   642                                    ; free state
+   643                                    call_free dword [state]
+   644 0000046B 60                  <1>  pusha
+   645 0000046C FF35[20000000]      <1>  push %1
+   646 00000472 E8(00000000)        <1>  call free
+   647 00000477 83C404              <1>  add esp, 4
+   648 0000047A 61                  <1>  popa
+   649                                    ; free cors
+   650 0000047B 8B1D[24000000]            mov ebx, dword [cors]
+   651 00000481 B900000000                mov ecx, 0
+   652                                    .free_co:
+   653                                      call_free dword[ebx+4*ecx]
+   654 00000486 60                  <1>  pusha
+   655 00000487 FF348B              <1>  push %1
+   656 0000048A E8(00000000)        <1>  call free
+   657 0000048F 83C404              <1>  add esp, 4
+   658 00000492 61                  <1>  popa
+   659 00000493 41                          inc ecx
+   660 00000494 3B0D[14000000]              cmp ecx, dword[NumCo]
+   661 0000049A 75EA                        jnz .free_co
+   662                                    call_free ebx
+   663 0000049C 60                  <1>  pusha
+   664 0000049D 53                  <1>  push %1
+   665 0000049E E8(00000000)        <1>  call free
+   666 000004A3 83C404              <1>  add esp, 4
+   667 000004A6 61                  <1>  popa
+   668                                    return_from_func
+   669 000004A7 89EC                <1>  mov esp, ebp
+   670 000004A9 5D                  <1>  pop ebp
+   671 000004AA C3                  <1>  RET
+   672                                  
+   673                                  
+   674                                  cell_func:
+   675 000004AB 8B1D[20000000]            mov ebx, dword [state]      ; get pointer to satrt of sate
+   676 000004B1 B800000000                mov eax, 0
+   677 000004B6 B900000000                mov ecx, 0
+   678                                  
+   679 000004BB 8A450C                    mov al, byte[ebp+12]     ; get y
+   680 000004BE A801                      test al, 1
+   681 000004C0 7469                      jz .even_line
+   682                                    ; odd line
+   683                                      ; check top left neigbor odd line
+   684 000004C2 3C00                        cmp al, 0
+   685 000004C4 7505                        jne .top_left_odd     ; if y=0 top neigbor is in to bottom row
+   686 000004C6 A0[0C000000]                  mov al, byte [WorldLength]
+   687                                      .top_left_odd:
+   688 000004CB FEC8                          dec al                ; get above row index
+   689 000004CD F625[08000000]                mul byte[WorldWidth]  ; get offset to start of above row in state
+   690 000004D3 024508                        add al, byte[ebp+8]   ; get offset to the x'th item in the above row (top left neigbor)
+   691 000004D6 020C03                        add cl, byte[ebx+eax] ; if top left neigbor is alive, increment neigbor count
+   692                                  
+   693                                      ; check top right neigbor odd line
+   694 000004D9 8A15[08000000]              mov dl, byte [WorldWidth]
+   695 000004DF FECA                        dec dl
+   696 000004E1 385508                      cmp byte[ebp+8], dl
+   697 000004E4 7506                        jne .top_right_odd
+   698 000004E6 2A05[08000000]                sub al, byte[WorldWidth]
+   699                                      .top_right_odd:
+   700 000004EC FEC0                          inc al
+   701 000004EE 020C03                        add cl, byte[ebx+eax] ; if top right neigbor is alive, increment neigbor count
+   702                                  
+   703                                      ; check bottom left neigbor odd line
+   704 000004F1 8A450C                      mov al, byte [ebp+12] ; get y
+   705 000004F4 8A15[0C000000]              mov dl, byte [WorldLength]
+   706 000004FA FECA                        dec dl
+   707 000004FC 38550C                      cmp byte [ebp+12], dl
+   708 000004FF 7502                        jne .bottom_left_odd
+   709 00000501 B0FF                          mov al, -1
+   710                                      .bottom_left_odd:
+   711 00000503 FEC0                          inc al
+   712 00000505 F625[08000000]                mul byte [WorldWidth]
+   713 0000050B 024508                        add al, byte [ebp+8]
+   714 0000050E 020C03                        add cl, byte[ebx+eax] ; if top right neigbor is alive, increment neigbor count
+   715                                  
+   716                                      ;check bottom right neigbor odd line
+   717 00000511 8A15[08000000]              mov dl, byte [WorldWidth]
+   718 00000517 FECA                        dec dl
+   719 00000519 385508                      cmp byte[ebp+8], dl
+   720 0000051C 7506                        jne .bottom_right_odd
+   721 0000051E 2A05[08000000]                sub al, byte[WorldWidth]
+   722                                      .bottom_right_odd:
+   723 00000524 FEC0                          inc al
+   724 00000526 020C03                        add cl, byte[ebx+eax] ; if top right neigbor is alive, increment neigbor count
+   725                                  
+   726 00000529 EB59                    jmp .left_right
+   727                                  
+   728                                  .even_line:
+   729                                    ; check top right neigbor even line
+   730 0000052B 3C00                      cmp al, 0
+   731 0000052D 7505                      jne .top_right_even     ; if y=0 top neigbor is in to bottom row
+   732 0000052F A0[0C000000]                mov al, byte [WorldLength]
+   733                                    .top_right_even:
+   734 00000534 FEC8                        dec al                ; get above row index
+   735 00000536 F625[08000000]              mul byte[WorldWidth]  ; get offset to start of above row in state
+   736 0000053C 024508                      add al, byte[ebp+8]   ; get offset to the x'th item in the above row (top left neigbor)
+   737 0000053F 020C03                      add cl, byte[ebx+eax] ; if top right neigbor is alive, increment neigbor count
+   738                                  
+   739                                    ; check top left neigbor even line
+   740 00000542 807D0800                  cmp byte[ebp+8], 0
+   741 00000546 7506                      jne .top_left_even
+   742 00000548 0205[08000000]              add al, byte[WorldWidth]
+   743                                    .top_left_even:
+   744 0000054E FEC8                        dec al
+   745 00000550 020C03                      add cl, byte[ebx+eax] ; if top right neigbor is alive, increment neigbor count
+   746                                  
+   747                                    ; check bottom right neigbor even line
+   748 00000553 8A450C                    mov al, byte [ebp+12] ; get y
+   749 00000556 8A15[0C000000]            mov dl, byte [WorldLength]
+   750 0000055C FECA                      dec dl
+   751 0000055E 38550C                    cmp byte [ebp+12], dl
+   752 00000561 7502                      jne .bottom_right_even
+   753 00000563 B0FF                        mov al, -1
+   754                                    .bottom_right_even:
+   755 00000565 FEC0                        inc al
+   756 00000567 F625[08000000]              mul byte [WorldWidth]
+   757 0000056D 024508                      add al, byte [ebp+8]
+   758 00000570 020C03                      add cl, byte[ebx+eax] ; if top right neigbor is alive, increment neigbor count
+   759                                  
+   760                                    ;check bottom left neigbor even line
+   761 00000573 807D0800                  cmp byte[ebp+8], 0
+   762 00000577 7506                      jne .bottom_left_even
+   763 00000579 0205[08000000]              add al, byte [WorldWidth]
+   764                                    .bottom_left_even:
+   765 0000057F FEC8                        dec al
+   766 00000581 020C03                      add cl, byte[ebx+eax] ; if top right neigbor is alive, increment neigbor count
+   767                                  
+   768                                  .left_right:
+   769                                  ; check left neigbor
+   770 00000584 8A450C                  mov al, byte[ebp+12]        ; get y
+   771 00000587 F625[08000000]          mul byte [WorldWidth]       ; get offset to start of the y'th row in state
+   772 0000058D 024508                  add al, byte [ebp+8]
+   773 00000590 807D0800                cmp byte [ebp+8], 0
+   774 00000594 7506                    jne .left
+   775 00000596 0205[08000000]            add al, byte [WorldWidth]
+   776                                  .left:
+   777 0000059C FEC8                      dec al
+   778 0000059E 020C03                    add cl, byte[ebx+eax] ; if top right neigbor is alive, increment neigbor count
+   779                                  
+   780                                  ; check right neigbor
+   781 000005A1 8A450C                  mov al, byte[ebp+12]      ; get y
+   782 000005A4 F625[08000000]          mul byte [WorldWidth]     ; get offset to start of the y'th row in state
+   783 000005AA 024508                  add al, byte [ebp+8]
+   784 000005AD 8A15[08000000]          mov dl, byte [WorldWidth]
+   785 000005B3 FECA                    dec dl
+   786 000005B5 385508                  cmp byte [ebp+8], dl
+   787 000005B8 7506                    jne .right
+   788 000005BA 2A05[08000000]            sub al, byte [WorldWidth]
+   789                                  .right:
+   790 000005C0 FEC0                      inc al
+   791 000005C2 020C03                    add cl, byte[ebx+eax] ; if top right neigbor is alive, increment neigbor count
+   792                                  
+   793                                  ; check current state
+   794 000005C5 8A450C                  mov al, byte [ebp+12]
+   795 000005C8 F625[08000000]          mul byte [WorldWidth]
+   796 000005CE 024508                  add al, byte [ebp+8]
+   797 000005D1 BA00000000              mov edx, 0
+   798 000005D6 803C0301                cmp byte [ebx+eax], 1
+   799 000005DA 7409                    je .alive
+   800                                    ; current cell is currently dead
+   801 000005DC 83F902                    cmp ecx, 2
+   802 000005DF 7510                      jne .update_cell
+   803 000005E1 B201                        mov dl, 1
+   804 000005E3 EB0C                        jmp .update_cell
+   805                                  .alive:
+   806                                    ; current cell is currently alive
+   807 000005E5 83F903                    cmp ecx, 3
+   808 000005E8 7C07                      jl .update_cell
+   809 000005EA 83F904                    cmp  ecx, 4
+   810 000005ED 7F02                      jg .update_cell
+   811 000005EF B201                      mov dl, 1
+   812                                  .update_cell:
+   813                                  
+   814 000005F1 8B1D[2C000000]            mov ebx, dword[scheduler]   ; resume scheduler
+   815 000005F7 E855FEFFFF                call resume
+   816                                  
+   817 000005FC 8B1D[20000000]            mov ebx, dword[state]
+   818 00000602 881403                    mov byte [ebx+eax], dl      ; update cell state in state
+   819                                  
+   820 00000605 8B1D[2C000000]            mov ebx, dword[scheduler]   ; resume scheduler
+   821 0000060B E841FEFFFF                call resume
+   822                                  
+   823 00000610 E996FEFFFF              jmp cell_func                 ; start func from the bgginig

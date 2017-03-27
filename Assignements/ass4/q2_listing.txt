@@ -1,0 +1,21 @@
+     1                                  global _start
+     2                                  section .text
+     3                                  get_my_loc:
+     4 00000000 59                      	pop ecx
+     5 00000001 EB0B                    	jmp anchor
+     6                                  _start:
+     7 00000003 31C0                    		xor eax, eax
+     8 00000005 31DB                    		xor ebx, ebx
+     9 00000007 31D2                    		xor edx, edx
+    10 00000009 E8F2FFFFFF              		call get_my_loc
+    11                                  	anchor:
+    12 0000000E 83C10F                  		add ecx, msg1-anchor
+    13 00000011 B206                    		mov dl, 6
+    14 00000013 B301                    		mov bl, 1
+    15 00000015 B004                    		mov al, 4
+    16 00000017 CD80                    		int 0x80
+    17                                  	next:
+    18 00000019 B001                    		mov al, 1
+    19 0000001B CD80                    		int 0x80
+    20 0000001D 7468616E6B20796F75-     msg1: db "thank you!"
+    21 00000026 21                 
