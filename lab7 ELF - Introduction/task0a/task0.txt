@@ -1,0 +1,35 @@
+1.Where is the entry point specified, and what is its value?
+	in the elf_header under	e_entry. its value is 0x80482e0
+
+2.How many sections are there in a.out?
+	we can see the number of sections in the elf header under e_shnum.
+	in a.out there are 33 = 34-1 (the section at index zero in allways null).
+
+3.What is the size of the .text section?
+	we can locate the size of a section in the section headrs table 
+	under the sectction headers sh_size enty.
+	in a.out the .text section occupies 0001b8H = 440 bytes.
+
+4.Does the symbol _start occur in the file? If so, where is it mapped to in virtual memory?
+	in a.out there is a _start symbol under the .text section (index 12)
+	and the function_virtual_address can be found in the symbols header st_value entry.
+	function_virtual_address = 080482e0H,
+
+5.Does the symbol main occur in the file? If so, where is it mapped to in virtual memory?
+	in a.out there is a main symbol under the .text section (index 12)
+	function_virtual_address = 08048388H,
+	
+6.Where in the file does the code of function "main" start?
+	symbols can be located in the symbol table.
+	and we can find what is there offset inside the elf file by using the following formula:
+	symbol_file_offset = section_file_offset + function_virtual_address - section_virtual_address.	
+	where the enclosing section inder (in the section headrs table) can be found under the symbols st_shndx
+	section_file_offset can be found in the section headers table at index st_shndx
+	under sh_offset entry in this section header.
+	the section_virtual_address sh_addr entry under the same section header.
+	and the function_virtual_address can be found in the symbols st_value entry.
+	
+	its section_file_offset = 0002e0H,
+	section_virtual_address = 080482e0H,
+	function_virtual_address = 08048388H,
+	there for its offset in the elf file is 0002e0H + 08048388H - 080482e0H = 000388H = 904.

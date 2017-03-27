@@ -1,0 +1,6 @@
+main offset: 0003b0 + 08048464 - 080483b0  = 464
+main size: 175
+
+
+55 push ebp
+89 e5 mov ebp,esp

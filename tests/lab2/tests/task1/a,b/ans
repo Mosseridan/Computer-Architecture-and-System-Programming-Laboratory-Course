@@ -1,0 +1,16 @@
+- &addr2: 0xfffe4500 -> located on the stack
+- &addr3: 0xfffe4504 -> located on the stack
+- foo: 0x8048521 -> text
+- &addr5: 0x804a034 -> located on the uninitialized data
+dist1: (size_t)&addr6 - (size_t)p: -4 -> uninitialized data
+dist2: (size_t)&local - (size_t)p: -134634340 -> stack
+dist3: (size_t)&foo - (size_t)p:  -6931 -> text
+- addr0: 0x804a024 -> initialized data
+- addr1: 0x804a02c -> uninitialized data
+- &addr6: 0x804a030 -> uninitialized
+- yos: 0x8048650 -> initialized data Read only
+- addr4: 0x828a008 -> heap
+- &addr4: 0xfffe4508 -> stack
+
+ text    data     bss     dec     hex filename
+   1820     288      16    2124     84c addresses

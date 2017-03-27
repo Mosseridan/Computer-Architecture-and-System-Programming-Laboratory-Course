@@ -1,0 +1,80 @@
+ELF Header:
+  Magic:   7f 45 4c 46 01 01 01 00 00 00 00 00 00 00 00 00 
+  Class:                             ELF32
+  Data:                              2's complement, little endian
+  Version:                           1 (current)
+  OS/ABI:                            UNIX - System V
+  ABI Version:                       0
+  Type:                              EXEC (Executable file)
+  Machine:                           Intel 80386
+  Version:                           0x1
+  Entry point address:               0x8048060
+  Start of program headers:          52 (bytes into file)
+  Start of section headers:          1196 (bytes into file)
+  Flags:                             0x0
+  Size of this header:               52 (bytes)
+  Size of program headers:           32 (bytes)
+  Number of program headers:         1
+  Size of section headers:           40 (bytes)
+  Number of section headers:         5
+  Section header string table index: 2
+
+Section Headers:
+  [Nr] Name              Type            Addr     Off    Size   ES Flg Lk Inf Al
+  [ 0]                   NULL            00000000 000000 000000 00      0   0  0
+  [ 1] .text             PROGBITS        08048060 000060 00042b 00  AX  0   0 16
+  [ 2] .shstrtab         STRTAB          00000000 00048b 000021 00      0   0  1
+  [ 3] .symtab           SYMTAB          00000000 000574 0001b0 10      4  23  4
+  [ 4] .strtab           STRTAB          00000000 000724 0000e0 00      0   0  1
+Key to Flags:
+  W (write), A (alloc), X (execute), M (merge), S (strings)
+  I (info), L (link order), G (group), T (TLS), E (exclude), x (unknown)
+  O (extra OS processing required) o (OS specific), p (processor specific)
+
+There are no section groups in this file.
+
+Program Headers:
+  Type           Offset   VirtAddr   PhysAddr   FileSiz MemSiz  Flg Align
+  LOAD           0x000000 0x08048000 0x08048000 0x0048b 0x0048b R E 0x1000
+
+ Section to Segment mapping:
+  Segment Sections...
+   00     .text 
+
+There is no dynamic section in this file.
+
+There are no relocations in this file.
+
+The decoding of unwind sections for machine type Intel 80386 is not currently supported.
+
+Symbol table '.symtab' contains 27 entries:
+   Num:    Value  Size Type    Bind   Vis      Ndx Name
+     0: 00000000     0 NOTYPE  LOCAL  DEFAULT  UND 
+     1: 08048060     0 SECTION LOCAL  DEFAULT    1 
+     2: 00000000     0 FILE    LOCAL  DEFAULT  ABS task3.s
+     3: 08048267     0 NOTYPE  LOCAL  DEFAULT    1 resume_infected
+     4: 08048276     0 NOTYPE  LOCAL  DEFAULT    1 VirusExit
+     5: 08048282     0 NOTYPE  LOCAL  DEFAULT    1 Err_Open
+     6: 080482ad     0 NOTYPE  LOCAL  DEFAULT    1 Err_Close
+     7: 080482d9     0 NOTYPE  LOCAL  DEFAULT    1 Err_Read
+     8: 08048305     0 NOTYPE  LOCAL  DEFAULT    1 Err_Write
+     9: 08048331     0 NOTYPE  LOCAL  DEFAULT    1 Err_Elf
+    10: 0804835d     0 NOTYPE  LOCAL  DEFAULT    1 get_my_loc
+    11: 08048362     0 NOTYPE  LOCAL  DEFAULT    1 anchor
+    12: 08048364     0 NOTYPE  LOCAL  DEFAULT    1 FileName
+    13: 0804836c     0 NOTYPE  LOCAL  DEFAULT    1 OutStr
+    14: 0804839b     0 NOTYPE  LOCAL  DEFAULT    1 Failstr
+    15: 080483a8     0 NOTYPE  LOCAL  DEFAULT    1 ErrOpen
+    16: 0804842c     0 NOTYPE  LOCAL  DEFAULT    1 ErrClose
+    17: 08048440     0 NOTYPE  LOCAL  DEFAULT    1 ErrRead
+    18: 08048459     0 NOTYPE  LOCAL  DEFAULT    1 ErrWrite
+    19: 08048470     0 NOTYPE  LOCAL  DEFAULT    1 ErrElf
+    20: 08048487     0 NOTYPE  LOCAL  DEFAULT    1 PreviousEntryPoint
+    21: 0804848b     0 NOTYPE  LOCAL  DEFAULT    1 virus_end
+    22: 00000000     0 FILE    LOCAL  DEFAULT  ABS 
+    23: 08048060     0 NOTYPE  GLOBAL DEFAULT    1 _start
+    24: 0804948b     0 NOTYPE  GLOBAL DEFAULT    1 __bss_start
+    25: 0804948b     0 NOTYPE  GLOBAL DEFAULT    1 _edata
+    26: 0804948c     0 NOTYPE  GLOBAL DEFAULT    1 _end
+
+No version information found in this file.
