@@ -1,0 +1,28 @@
+     1                                  %macro	syscall3 4
+     2                                  	mov	edx, %4
+     3                                  	mov	ecx, %3
+     4                                  	mov	ebx, %2
+     5                                  	mov	eax, %1
+     6                                  	int	0x80
+     7                                  %endmacro
+     8                                  
+     9                                  section .data
+    10 00000000 01                      z db 1
+    11 00000001 4A01                    x dw 330
+    12 00000003 0700                    y dw 7
+    13                                  
+    14                                  
+    15                                  global _start
+    16                                  section .text
+    17                                  _start:
+    18 00000000 BAF0F0F0F0              		mov edx, 0xf0f0f0f0
+    19                                  
+    20 00000005 B920000000              		mov ecx, 32
+    21 0000000A D1D2                    		L: rcl edx, 1
+    22 0000000C B301                    				mov bl, 1
+    23 0000000E 80DB00                  			 sbb bl ,0
+    24 00000011 08DA                    			 or dl, bl
+    25 00000013 E2F5                    			 loop L, ecx
+    26                                  
+    27 00000015 B801000000              		mov eax, 1
+    28 0000001A CD80                    		int 0x80

@@ -1,0 +1,49 @@
+     1                                  global _start
+     2                                  
+     3                                  section .rodata
+     4 00000000 0100020004000800        BitTbl: dw 1, 2, 4, 8
+     5 00000008 1000200040008000        			dw 10h, 20h, 40h, 80h
+     6 00000010 0001000200040008        			dw 100h, 200h, 400h, 800h
+     7 00000018 0010002000400080        			dw 1000h, 2000h, 4000h, 8000h
+     8                                  
+     9                                  section .text
+    10                                  _start:
+    11 00000000 66B8AAAA                	mov ax, 1010101010101010b
+    12 00000004 66BB0100                	mov bx, 1
+    13                                  	b1:
+    14 00000008 E82A000000              	call Member
+    15                                  	b2:
+    16 0000000D 66BB0200                	mov bx, 2
+    17 00000011 E821000000              	call Member
+    18                                  	b3:
+    19                                  
+    20 00000016 B801000000              	mov eax, 1
+    21 0000001B CD80                    	int 0x80
+    22                                  
+    23                                  Delete:
+    24 0000001D 81E3FFFF0000            	and ebx, 0xFFFF ; clear upper 16 bits of ebx
+    25 00000023 668B8C1B[00000000]      	mov cx, [BitTbl+2*ebx]
+    26 0000002B 6621C1                  	and cx, ax ; make sure the given number is in the set
+    27 0000002E 6631C8                  	xor ax, cx ; delete requested bit (number)
+    28 00000031 C3                      	ret
+    29                                  
+    30                                  Odd:
+    31 00000032 66A95555                	test ax, 0101010101010101b ; will set the zero flag to 1 if there are no even numbers in the set
+    32 00000036 C3                      	ret
+    33                                  
+    34                                  Member:
+    35 00000037 81E3FFFF0000            	and ebx, 0xFFFF ; clear upper 16 bits of ebx
+    36 0000003D 6685841B[00000000]      	test ax, [BitTbl+2*ebx] ; if the set dos not contain the given number zero flag will be set
+    37 00000045 C3                      	ret
+    38                                  
+    39                                  UnionSets:
+    40 00000046 6609D8                  	or ax, bx
+    41 00000049 C3                      	ret
+    42                                  
+    43                                  Intersection:
+    44 0000004A 6621D8                  	and ax, bx
+    45 0000004D C3                      	ret
+    46                                  
+    47                                  Complement:
+    48 0000004E 66F7D0                  	not ax
+    49 00000051 C3                      	ret

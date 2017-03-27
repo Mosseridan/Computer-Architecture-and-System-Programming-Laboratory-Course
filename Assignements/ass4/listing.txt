@@ -1,0 +1,37 @@
+     1                                  global _start
+     2                                  
+     3                                  X equ 0x70
+     4                                  Y equ 0x71
+     5                                  Z equ 0x72
+     6                                  ANS equ 0x73
+     7                                  
+     8                                  section .text
+     9                                  _start:
+    10                                  
+    11 00000000 A070000000              	mov al, [X]
+    12 00000005 8A1D71000000            	mov bl, [Y]
+    13                                  
+    14 0000000B A801                    		test al, 1
+    15 0000000D 7402                    		jz x_even
+    16 0000000F B000                    			mov al, 0
+    17                                  	x_even:
+    18 00000011 F6C301                  		test bl, 1
+    19 00000014 7402                    		jz y_even
+    20 00000016 B300                    			mov bl, 0
+    21                                  	y_even:
+    22 00000018 F6C101                  		test cl, 1
+    23 0000001B 7402                    		jz z_even
+    24 0000001D B100                    			mov cl, 0
+    25                                  	z_even:
+    26 0000001F 38D8                    		cmp al, bl
+    27 00000021 7302                    		jae compare_z
+    28 00000023 88D8                    			mov al, bl
+    29                                  	compare_z:
+    30 00000025 38C8                    		cmp al, cl
+    31 00000027 7302                    		jae save_ans
+    32 00000029 88C8                    			mov al, cl
+    33                                  	save_ans:
+    34 0000002B A273000000              		mov byte [ANS], al
+    35                                  
+    36 00000030 B001                    	mov al, 1
+    37 00000032 CD80                    	int 0x80

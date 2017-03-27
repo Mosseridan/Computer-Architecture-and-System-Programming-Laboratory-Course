@@ -1,0 +1,22 @@
+     1                                  section .data
+     2                                  Foos:
+     3 00000000 8B1D[15000000]          	mov ebx, [Fob]
+     4 00000006 66891D[0F000000]        	mov [Foa], bx
+     5 0000000D 01C0                    	add eax, eax
+     6                                  
+     7                                  Foa:
+     8 0000000F 48                      	dec eax
+     9 00000010 E8EBFFFFFF              	call Foos
+    10                                  
+    11                                  Fob:
+    12 00000015 C3                      	ret
+    13 00000016 B850EA4040              	mov eax, 0x4040ea50
+    14                                  
+    15                                  global _start
+    16                                  section .text
+    17                                  _start:
+    18                                  
+    19 00000000 E8(00000000)            	call Foos
+    20                                  
+    21 00000005 B801000000              	mov eax, 1
+    22 0000000A CD80                    	int 0x80
